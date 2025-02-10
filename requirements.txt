@@ -1,2 +1,2 @@
-google-cloud-bigquery
+firebase_admin
 flask
