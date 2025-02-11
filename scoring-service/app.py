@@ -1,0 +1,156 @@
+# scoring-service/app.py
+import os
+import json
+from flask import Flask, jsonify, request
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud import storage
+from google.cloud import pubsub_v1
+from google import genai
+from google.genai import types
+
+app = Flask(__name__)
+
+PROJECT_ID = "agentarena-448413"
+FIRESTORE_COLLECTION = "scores"
+GCS_BUCKET_NAME = "agent_arena_questions"
+QUESTIONS_FILE = "questions_answers.json"
+
+cred = credentials.ApplicationDefault()
+firebase_admin.initialize_app(cred, {
+    'projectId': PROJECT_ID,
+})
+db = firestore.client()
+
+storage_client = storage.Client(project=PROJECT_ID)
+bucket = storage_client.bucket(GCS_BUCKET_NAME)
+blob = bucket.blob(QUESTIONS_FILE)
+
+try:
+    json_data = blob.download_as_bytes()
+    QUESTIONS = json.loads(json_data)
+    print("Questions loaded from GCS successfully.")
+except Exception as e:
+    print(f"Error loading questions from GCS: {e}")
+    QUESTIONS = [
+        {"id": 1, "text": "What is your favorite color?"},
+        {"id": 2, "text": "What is the capital of France?"},
+    ]
+    print("Using default fallback questions.")
+
+subscriber = pubsub_v1.SubscriberClient()
+subscription_path = subscriber.subscription_path(PROJECT_ID, "answer_submissions-sub")
+
+client = genai.Client(
+    vertexai=True,
+    project="agentarena-448413",
+    location="europe-west1",
+)
+
+model = "gemini-2.0-flash-001"
+  
+generate_content_config = types.GenerateContentConfig(
+    temperature = 1,
+    top_p = 0.95,
+    max_output_tokens = 2,
+    response_modalities = ["TEXT"],
+    safety_settings = [types.SafetySetting(
+      category="HARM_CATEGORY_HATE_SPEECH",
+      threshold="OFF"
+    ),types.SafetySetting(
+      category="HARM_CATEGORY_DANGEROUS_CONTENT",
+      threshold="OFF"
+    ),types.SafetySetting(
+      category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+      threshold="OFF"
+    ),types.SafetySetting(
+      category="HARM_CATEGORY_HARASSMENT",
+      threshold="OFF"
+    )],
+)
+
+def callback(message):
+    try:
+        data = json.loads(message.data.decode("utf-8"))
+        agent_id = data['agent_id']
+        question_id = data['question_id']
+        answer_text = data['answer']
+
+        question = next((q['text'] for q in QUESTIONS if q['id'] == question_id), None)
+        scoring_criteria = next((q['criteria'] for q in QUESTIONS if q['id'] == question_id), None)
+        if question and scoring_criteria:
+          score = generate(question, scoring_criteria, answer_text)
+          if score and score.isdigit():
+              score = int(score)
+              doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}") # Changed line
+              doc_ref.set({
+                  'agent_id': agent_id,
+                  'question_id': question_id,
+                  'answer': answer_text,
+                  'score': score
+              })
+              print(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
+
+          else:
+            print(f"Invalid score generated for agent {agent_id}, question {question_id}: {score}")
+        else:
+            print(f"Question or scoring criteria not found for question ID: {question_id}")
+
+        message.ack()
+
+    except Exception as e:
+        print(f"Error processing message: {e}")
+        message.nack()
+
+def generate(question, scoring_criteria, answer):
+  text1 = types.Part.from_text(text=f"""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria. You will be given the question, the important points that should be included in the answer, and the actual answer provided by the AI agent.  Your output should be a score from 1 to 10, where 1 is the lowest score (very poor answer) and 10 is the highest score (excellent answer).
+
+Instructions:
+
+1. Carefully analyze the question and understand its nuances.
+2. Review the important points that should be present in a good answer. These points serve as your evaluation criteria.
+3. Evaluate the AI agent's answer based on how well it addresses the question and incorporates the important points.
+4. Consider the following factors when assigning a score:
+    * Accuracy: Does the answer correctly address the question?
+    * Completeness: Does the answer cover all the important points?
+    * Clarity: Is the answer easy to understand and well-organized?
+    * Relevance: Is the information provided in the answer relevant to the question?
+    * Conciseness: Is the answer concise and to the point, avoiding unnecessary information?
+
+5. Assign a score from 1 to 10 based on your overall assessment.  Be objective and consistent in your scoring.
+
+Input:
+
+Question: {question}
+
+Important Points: {scoring_criteria}
+
+Answer: {answer}
+
+
+Output:  Provide only the numerical score (1-10)""")
+  print(text1)
+  contents = [
+    types.Content(
+      role="user",
+      parts=[
+        text1
+      ]
+    )
+    ]
+  response = client.models.generate_content(
+    model = model,
+    contents = contents,
+    config = generate_content_config,
+    )
+  return response.text
+
+if __name__ == '__main__':
+    streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
+    print(f"Listening for messages on {subscription_path}..\n")
+    with subscriber:
+        try:
+            streaming_pull_future.result() #This will block until an exception or interrupt
+        except TimeoutError:
+            streaming_pull_future.cancel()
+            streaming_pull_future.result()

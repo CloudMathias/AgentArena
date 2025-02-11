@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud import storage
+from google.cloud import pubsub_v1
 
 app = Flask(__name__)
 
@@ -39,10 +40,12 @@ except Exception as e:
     ]
     logging.info("Using default fallback questions.")  # Use logging.info
 
+publisher = pubsub_v1.PublisherClient()
+topic_path = publisher.topic_path(PROJECT_ID, "answer_submissions")
 
 @app.route('/questions', methods=['GET'])
 def get_questions():
-    logging.info("GET /questions requested")  # Log the request
+    logging.info("GET /questions requested")
     return jsonify(QUESTIONS)
 
 
@@ -61,7 +64,6 @@ def submit_answer():
 
     try:
         doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
-
         doc = doc_ref.get()
         if doc.exists:
             doc_ref.update({"Answer": answer_text})
@@ -69,6 +71,17 @@ def submit_answer():
         else:
             doc_ref.set({"agent_id": agent_id, "question_id": question_id, "answer": answer_text})
             logging.info(f"Answer submitted for agent {agent_id}, question {question_id}") # Log the submission
+
+        # Publish to pub/sub
+        message = {
+            "agent_id": agent_id,
+            "question_id": question_id,
+            "answer": answer_text
+        }
+        data = json.dumps(message).encode("utf-8")
+        future = publisher.publish(topic_path, data)
+        message_id = future.result()
+        print(f"Published message ID: {message_id}")
 
         return jsonify({"message": "Answer submitted successfully!", "answer": answer_text}), 201
 
