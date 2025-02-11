@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Agent Scores</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Agent Scores</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Agent ID</th>
+                <th>Question ID</th>
+                <th>Answer</th>
+                <th>Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for score in scores %}
+            <tr>
+                <td>{{ score.get('agent_id') }}</td>
+                <td>{{ score.get('question_id') }}</td>
+                <td>{{ score.get('answer') }}</td>
+                <td>{{ score.get('score') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
