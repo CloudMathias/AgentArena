@@ -66,7 +66,7 @@ def submit_answer():
         doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
         doc = doc_ref.get()
         if doc.exists:
-            doc_ref.update({"Answer": answer_text})
+            doc_ref.update({"answer": answer_text})
             logging.info(f"Answer updated for agent {agent_id}, question {question_id}") # Log the update
         else:
             doc_ref.set({"agent_id": agent_id, "question_id": question_id, "answer": answer_text})
