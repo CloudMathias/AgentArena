@@ -1,16 +1,11 @@
-# scoring-service/app.py
-import os
 import json
 import re
-from flask import Flask, jsonify, request
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud import storage
 from google.cloud import pubsub_v1
 from google import genai
 from google.genai import types
-
-app = Flask(__name__)
 
 PROJECT_ID = "agentarena-448413"
 FIRESTORE_COLLECTION = "scores"
@@ -49,24 +44,24 @@ client = genai.Client(
 )
 
 model = "gemini-2.0-flash-001"
-  
+
 generate_content_config = types.GenerateContentConfig(
-    temperature = 1,
-    top_p = 0.95,
-    max_output_tokens = 2,
-    response_modalities = ["TEXT"],
-    safety_settings = [types.SafetySetting(
-      category="HARM_CATEGORY_HATE_SPEECH",
-      threshold="OFF"
-    ),types.SafetySetting(
-      category="HARM_CATEGORY_DANGEROUS_CONTENT",
-      threshold="OFF"
-    ),types.SafetySetting(
-      category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-      threshold="OFF"
-    ),types.SafetySetting(
-      category="HARM_CATEGORY_HARASSMENT",
-      threshold="OFF"
+    temperature=1,
+    top_p=0.95,
+    max_output_tokens=2,
+    response_modalities=["TEXT"],
+    safety_settings=[types.SafetySetting(
+        category="HARM_CATEGORY_HATE_SPEECH",
+        threshold="OFF"
+    ), types.SafetySetting(
+        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold="OFF"
+    ), types.SafetySetting(
+        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold="OFF"
+    ), types.SafetySetting(
+        category="HARM_CATEGORY_HARASSMENT",
+        threshold="OFF"
     )],
 )
 
@@ -81,16 +76,15 @@ def extract_integer_from_llm_output(llm_output):
         The extracted integer, or None if no integer is found.
     """
     if not isinstance(llm_output, str):
-        return None #Handle non-string input.
+        return None  # Handle non-string input.
 
-    # Use regular expression to find the first sequence of digits
     match = re.search(r'\d+', llm_output)
 
     if match:
         try:
-            return int(match.group())  # Convert the matched string to an integer
-        except ValueError: #In the unlikely case that int() fails.
-          return None
+            return int(match.group())
+        except ValueError:
+            return None
     else:
         return None
 
@@ -105,21 +99,21 @@ def callback(message):
         scoring_criteria = next((q['criteria'] for q in QUESTIONS if q['id'] == question_id), None)
 
         if question and scoring_criteria:
-          llm_output = generate(question, scoring_criteria, answer_text)
-          score = extract_integer_from_llm_output(llm_output)
-          if scoring_criteria:
-              score = int(score)
-              doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}") # Changed line
-              doc_ref.set({
-                  'agent_id': agent_id,
-                  'question_id': question_id,
-                  'answer': answer_text,
-                  'score': score
-              })
-              print(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
+            llm_output = generate(question, scoring_criteria, answer_text)
+            score = extract_integer_from_llm_output(llm_output)
+            if score is not None:
+                score = int(score)
+                doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
+                doc_ref.set({
+                    'agent_id': agent_id,
+                    'question_id': question_id,
+                    'answer': answer_text,
+                    'score': score
+                })
+                print(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
+            else:
+                print(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
 
-          else:
-            print(f"Invalid score generated for agent {agent_id}, question {question_id}: {score}")
         else:
             print(f"Question or scoring criteria not found for question ID: {question_id}")
 
@@ -130,9 +124,9 @@ def callback(message):
         message.nack()
 
 def generate(question, scoring_criteria, answer):
-  if answer == "":
-      answer = "No answer from the agent"
-  text1 = types.Part.from_text(text=f"""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria. You will be given the question, the important points that should be included in the answer, and the actual answer provided by the AI agent.  Your output should be a score from 1 to 10, where 1 is the lowest score (very poor answer) and 10 is the highest score (excellent answer).
+    if answer == "":
+        answer = "No answer from the agent"
+    text1 = types.Part.from_text(text=f"""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria. You will be given the question, the important points that should be included in the answer, and the actual answer provided by the AI agent.  Your output should be a score from 1 to 10, where 1 is the lowest score (very poor answer) and 10 is the highest score (excellent answer).
 
 Instructions:
 
@@ -157,27 +151,27 @@ Important Points: {scoring_criteria}
 Answer: {answer}
 
 Output:  Return only a numerical value from 1 to 10. Do not include any other text. Do not include any space""")
-  contents = [
-    types.Content(
-      role="user",
-      parts=[
-        text1
-      ]
-    )
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                text1
+            ]
+        )
     ]
-  response = client.models.generate_content(
-    model = model,
-    contents = contents,
-    config = generate_content_config,
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
     )
-  return response.text
+    return response.text
 
 if __name__ == '__main__':
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
     print(f"Listening for messages on {subscription_path}..\n")
     with subscriber:
         try:
-            streaming_pull_future.result() #This will block until an exception or interrupt
+            streaming_pull_future.result()
         except TimeoutError:
             streaming_pull_future.cancel()
             streaming_pull_future.result()
