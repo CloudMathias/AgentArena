@@ -166,11 +166,20 @@ Output:  Return only a numerical value from 1 to 10. Do not include any other te
     )
     return response.text
 
+app = Flask(__name__)
+
+@app.route('/healthz')
+def healthz():
+    return 'OK'
+
 if __name__ == '__main__':
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
     print(f"Listening for messages on {subscription_path}..\n")
     with subscriber:
         try:
+            #start the flask app in a seperate thread.
+            import threading
+            threading.Thread(target=app.run, kwargs={'host':'0.0.0.0','port':5000}).start()
             streaming_pull_future.result()
         except TimeoutError:
             streaming_pull_future.cancel()
