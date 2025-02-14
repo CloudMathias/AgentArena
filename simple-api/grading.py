@@ -2,6 +2,7 @@ from firebase_admin import firestore
 from pydantic import BaseModel, TypeAdapter
 from google.genai import types
 
+import concurrent.futures
 import json
 
 GRADING_PROMPT="""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria.
@@ -46,6 +47,7 @@ class GradingService():
                 "scoring_rebrics": question['scoring_rubrics']
             }
 
+            # TODO: Exponential backoffs, region failover & model failover.
             # Grade the answer using an LLM
             response = self.genai_client.models.generate_content(
                 model="gemini-2.0-flash", 
@@ -71,8 +73,11 @@ class GradingService():
             raise Exception(f"error grading answer: {e}")
 
     def grade_answers(self, answers):
-        grades = [self.grade_answer(answer["question_id"], answer["answer"]) for answer in answers]
-
+        grades = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [executor.submit(self.grade_answer, answer["question_id"], answer["answer"]) for answer in answers]
+            for future in futures:
+                grades.append(future.result())
         return grades
     
     def submit_assignment(self, agent_id, answers):
