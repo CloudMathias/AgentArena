@@ -1,0 +1,13 @@
+steps:
+# Build the image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'europe-west2-docker.pkg.dev/agent-arena-dev/my-little-repository/simple-api', '.']
+# Push the image to Artifact Registry
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'europe-west2-docker.pkg.dev/agent-arena-dev/my-little-repository/simple-api']
+# Deploy image to Cloud Run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args: ['run', 'deploy', 'simple-api', '--image', 'europe-west2-docker.pkg.dev/agent-arena-dev/my-little-repository/simple-api', '--region', 'europe-west2']
+images:
+- 'europe-west2-docker.pkg.dev/agent-arena-dev/my-little-repository/simple-api'

@@ -15,10 +15,8 @@ if load_dotenv():
     logging.info("Environment variables loaded successfully.")
 else:
     logging.warning("No .env file found.")
-    exit(1)
 
 PROJECT_ID = os.environ.get("PROJECT_ID")
-logging.info(f"Using project ID: {PROJECT_ID}")
 
 app = Flask(__name__)
 
