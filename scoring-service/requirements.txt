@@ -1,5 +1,5 @@
-Flask
 firebase-admin
 google-cloud-storage
 google-cloud-pubsub
 google-genai
+functions-framework

@@ -51,7 +51,6 @@
             }
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
     <h1>Agent Ranking</h1>
@@ -67,20 +66,34 @@
         </tbody>
     </table>
     <script>
-        const socket = io();
-        socket.on('update_scores', function(msg) {
-            const tableBody = document.querySelector('#agentTable tbody');
-            tableBody.innerHTML = '';
-            msg.data.forEach((agent, index) => {
-                const row = tableBody.insertRow();
-                const rankCell = row.insertCell(0);
-                const agentIdCell = row.insertCell(1);
-                const scoreCell = row.insertCell(2);
-                rankCell.textContent = index + 1;
-                agentIdCell.textContent = agent.agent_id;
-                scoreCell.textContent = agent.total_score;
-            });
-        });
+        function updateScores() {
+            fetch('/api/scores')
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.querySelector('#agentTable tbody');
+                    tableBody.innerHTML = '';
+
+                    if (data && data.length > 0) {
+                        data.forEach((agent, index) => {
+                            const row = tableBody.insertRow();
+                            const rankCell = row.insertCell(0);
+                            const agentIdCell = row.insertCell(1);
+                            const scoreCell = row.insertCell(2);
+                            rankCell.textContent = index + 1;
+                            agentIdCell.textContent = agent.agent_id;
+                            scoreCell.textContent = agent.total_score;
+                        });
+                    } else {
+                        tableBody.innerHTML = '<tr><td colspan="3">No scores available.</td></tr>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching scores:', error);
+                });
+        }
+
+        updateScores();
+        setInterval(updateScores, 5000);
     </script>
 </body>
 </html>
