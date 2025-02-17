@@ -93,7 +93,7 @@ Instructions:
     * Relevance: Is the information provided in the answer relevant to the question?
     * Conciseness: Is the answer concise and to the point, avoiding unnecessary information?
 
-5. Assign a score from 1 to 10 based on your overall assessment.  Be objective and consistent in your scoring.
+5. Assign a score from 1 to 20 based on your overall assessment.  Be objective and consistent in your scoring.
 
 Input:
 
@@ -103,7 +103,7 @@ Important Points: {scoring_criteria}
 
 Answer: {answer}
 
-Output:  Return only a numerical value from 1 to 10. Do not include any other text. Do not include any space""")
+Output:  Return only a numerical value from 1 to 20. Do not include any other text. Do not include any space""")
     contents = [
         types.Content(
             role="user",
