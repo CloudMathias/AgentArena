@@ -2,6 +2,7 @@ import json
 import re
 import base64
 import firebase_admin
+import logging
 from firebase_admin import credentials, firestore
 from google.cloud import storage
 from google.cloud import pubsub_v1
@@ -125,39 +126,44 @@ def score_answers(cloud_event):
        This function scores answers submitted by agents.
     """
     message = cloud_event.data["message"]
-    if message and "data" in message:
-        try:
-            encoded_data = message["data"]
-            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
-            print(decoded_data)
-            data = json.loads(decoded_data)
-            agent_id = data['agent_id']
-            question_id = data['question_id']
-            answer_text = data['answer']
+    if not message or "data" not in message:
+        logging.error(f"invalid cloud_event format: {cloud_event}")
+        raise Exception(f"failed to extract data from cloud event: {cloud_event}")
+    
+    try:
+        # Extract the data from the events body.
+        encoded_data = message["data"]
+        decoded_data = base64.b64decode(encoded_data).decode("utf-8")
+        logging.info(f"Successfully decoded event data: {decoded_data}")
+        data = json.loads(decoded_data)
+        agent_id = data['agent_id']
+        question_id = data['question_id']
+        answer_text = data['answer']
 
-            question = next((q['text'] for q in QUESTIONS if q['id'] == question_id), None)
-            scoring_criteria = next((q['criteria'] for q in QUESTIONS if q['id'] == question_id), None)
+        question = next((q['text'] for q in QUESTIONS if q['id'] == question_id), None)
+        scoring_criteria = next((q['criteria'] for q in QUESTIONS if q['id'] == question_id), None)
+        if not question or not scoring_criteria:
+            logging.error(f"question or scoring criteria not found for question ID: {question_id}")
+            raise Exception(f"question or scoring criteria not found for question ID: {question_id}")
 
-            if question and scoring_criteria:
-                llm_output = generate(question, scoring_criteria, answer_text)
-                score = extract_integer_from_llm_output(llm_output)
-                if score is not None:
-                    score = int(score)
-                    doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
-                    doc_ref.set({
-                        'agent_id': agent_id,
-                        'question_id': question_id,
-                        'answer': answer_text,
-                        'score': score
-                    })
-                    print(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
-                else:
-                    print(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
+        # Generate a score for each question in relation to the scoring criteria.
+        llm_output = generate(question, scoring_criteria, answer_text)
+        score = extract_integer_from_llm_output(llm_output)
+        if score is None:
+            logging.error(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
+            raise Exception(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
+        
+        # Save the agent's score to the database.
+        score = int(score)
+        doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
+        doc_ref.set({
+            'agent_id': agent_id,
+            'question_id': question_id,
+            'answer': answer_text,
+            'score': score
+        })
+        logging.info(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
+            
 
-            else:
-                print(f"Question or scoring criteria not found for question ID: {question_id}")
-
-        except Exception as e:
-            print(f"Error processing message: {e}")
-    else:
-        print("Invalid Pub/Sub message format.")
+    except Exception as e:
+        print(f"Error processing message: {e}")
