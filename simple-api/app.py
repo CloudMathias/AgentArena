@@ -1,10 +1,9 @@
 import os
 import logging
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud import storage
-from google import genai
 from grading import GradingService
 from question import QuestionService
 from dotenv import load_dotenv
@@ -30,16 +29,22 @@ db = firestore.client()
 # Initialize GCS client
 storage_client = storage.Client(project=PROJECT_ID)
 
-# Initialize Gen AI Client.
-genai_client = genai.Client(
-    vertexai=True,
-    project=PROJECT_ID,
-    location="europe-west1"
-)
-
 # Initialize dependencies
 question_service = QuestionService(storage_client)
-grading_service = GradingService(genai_client, db, question_service)
+grading_service = GradingService(db, question_service)
+
+@app.route('/leaderboard', methods=['GET'])
+def leaderboard():
+    return render_template('leaderboard.html')
+
+@app.route('/api/v2/scores', methods=['GET'])
+def get_scores():
+    try:
+        scores = grading_service.get_scores()
+        return jsonify(scores), 200
+    except Exception as e:
+        logging.error(f'failed to get scored: {e}')
+        return jsonify(f"failed to get questions"), 500
 
 @app.route('/api/v2/questions', methods=['GET'])
 def get_questions():

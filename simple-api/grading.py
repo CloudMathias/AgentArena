@@ -1,9 +1,13 @@
 from firebase_admin import firestore
 from pydantic import BaseModel, TypeAdapter
 from google.genai import types
+from google import genai
 
 import concurrent.futures
+import random
+import logging
 import json
+import os
 
 GRADING_PROMPT="""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria.
 
@@ -28,8 +32,7 @@ GradingResponseSchema = {
 
 
 class GradingService():
-    def __init__(self, genai_client, db, questionService):
-        self.genai_client = genai_client
+    def __init__(self, db, questionService):
         self.db = db
         self.questionService = questionService
 
@@ -48,16 +51,35 @@ class GradingService():
             }
 
             # TODO: Exponential backoffs, region failover & model failover.
-            # Grade the answer using an LLM
-            response = self.genai_client.models.generate_content(
-                model="gemini-2.0-flash", 
-                contents=json.dumps(grading_request),
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=GradingResponseSchema,
-                    system_instruction=GRADING_PROMPT
+            alternative_regions = ['europe-west4', 'europe-west9', 'europe-west1', 'europe-southwest1', 'europe-west8', 'europe-north1', 'europe-central2']
+            max_region_failovers = 3
+            for i in range(max_region_failovers):
+                # Create a new client here where location is 'europe-west2' if i = 0, or random.choice(available_regions) if i > 0.
+                location = 'europe-west2'
+                if i > 0:
+                    location = random.choice(alternative_regions)
+
+                genai_client = genai.Client(
+                    vertexai=True,
+                    project=os.environ.get("PROJECT_ID"),
+                    location=location
                 )
-            )
+
+                try:
+                    # Grade the answer using an LLM
+                    response = genai_client.models.generate_content(
+                        model="gemini-2.0-flash", 
+                        contents=json.dumps(grading_request),
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=GradingResponseSchema,
+                            system_instruction=GRADING_PROMPT,
+                        )
+                    )
+                except Exception as e:
+                    if i >= max_region_failovers - 1:
+                        logging.error('failed to generate grade: {e}')
+                        raise Exception(f'failed to generate grade: {e}')
 
             grading_response = response.parsed
             grade = {
@@ -93,3 +115,31 @@ class GradingService():
             return grades
         except Exception as e:
             raise Exception(f"error submitting assignment: {e}")
+        
+    def get_scores(self):
+        scores = []
+        agents_ref = self.db.collection('agents')
+        for agent in agents_ref.list_documents():
+            agent_id = agent.id
+            max_score = 0
+            logging.info(f"calculating score for agent '{agent_id}'")
+            
+            submissions_ref = self.db.collection('agents').document(agent_id).collection('submissions')
+            for doc in submissions_ref.stream():
+                logging.info(f"processing submission '{doc.id}' from agent '{agent_id}'")
+                submission = doc.to_dict()
+                score = 0
+                for grade in submission['grades']:
+                    score += grade['score']
+
+                if score > max_score:
+                    max_score = score
+            
+            scores.append({
+                "agent_id": agent_id,
+                "score": max_score
+            })
+
+        scores.sort(key=lambda x: x['score'], reverse=True)
+
+        return scores

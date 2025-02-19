@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Ranking</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #333;
+            margin: 20px 0;
+            text-align: center;
+        }
+        table {
+            width: 80%;
+            max-width: 800px;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+            font-weight: 600;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        tr:hover {
+            background-color: #f0f0f0;
+        }
+        @media (max-width: 600px) {
+            table {
+                width: 95%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Agent Ranking</h1>
+    <table id="agentTable">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Agent ID</th>
+                <th>Total Score</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    <script>
+        function updateScores() {
+            fetch('/api/v2/scores')
+                .then(response => response.json())
+                .then(scores => {
+                    const tableBody = document.querySelector('#agentTable tbody');
+                    tableBody.innerHTML = '';
+
+                    if (!scores || scores.length == 0) {
+                        tableBody.innerHTML = '<tr><td colspan="3">No scores available.</td></tr>';
+                        return
+                    }
+
+                    for (const [i, score] of scores.entries()) {
+                        const row = tableBody.insertRow();
+                        const rankCell = row.insertCell(0);
+                        const agentIdCell = row.insertCell(1);
+                        const scoreCell = row.insertCell(2);
+                        rankCell.textContent = i + 1;
+                        agentIdCell.textContent = score.agent_id;
+                        scoreCell.textContent = score.score;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching scores:', error);
+                });
+        }
+
+        updateScores();
+        setInterval(updateScores, 5000);
+    </script>
+</body>
+</html>
