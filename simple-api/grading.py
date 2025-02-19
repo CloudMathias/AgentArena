@@ -115,30 +115,34 @@ class GradingService():
             return grades
         except Exception as e:
             raise Exception(f"error submitting assignment: {e}")
+    
+    def get_score(self, agent_id):
+        logging.info(f"calculating score for agent '{agent_id}'")
+        max_score = 0
+        submissions_ref = self.db.collection('agents').document(agent_id).collection('submissions')
+        for doc in submissions_ref.stream():
+            logging.info(f"processing submission '{doc.id}' from agent '{agent_id}'")
+            submission = doc.to_dict()
+            score = 0
+            for grade in submission['grades']:
+                score += grade['score']
+
+            if score > max_score:
+                    max_score = score
         
+        return {
+            "agent_id": agent_id,
+            "score": max_score
+        }
+
+
     def get_scores(self):
         scores = []
         agents_ref = self.db.collection('agents')
         for agent in agents_ref.list_documents():
             agent_id = agent.id
-            max_score = 0
-            logging.info(f"calculating score for agent '{agent_id}'")
-            
-            submissions_ref = self.db.collection('agents').document(agent_id).collection('submissions')
-            for doc in submissions_ref.stream():
-                logging.info(f"processing submission '{doc.id}' from agent '{agent_id}'")
-                submission = doc.to_dict()
-                score = 0
-                for grade in submission['grades']:
-                    score += grade['score']
-
-                if score > max_score:
-                    max_score = score
-            
-            scores.append({
-                "agent_id": agent_id,
-                "score": max_score
-            })
+            score = self.get_score(agent_id)
+            scores.append(score)
 
         scores.sort(key=lambda x: x['score'], reverse=True)
 

@@ -45,6 +45,19 @@ def get_scores():
     except Exception as e:
         logging.error(f'failed to get scored: {e}')
         return jsonify(f"failed to get questions"), 500
+    
+@app.route('/api/v2/scores/<agent_id>', methods=['GET'])
+def get_score(agent_id):
+    try:
+        if not agent_id:
+            logging.warning("Invalid request. Missing agent_id")
+            return jsonify({"error": "Invalid request. Missing agent_id."}), 400
+
+        score = grading_service.get_score(agent_id)
+        return jsonify(score), 200
+    except Exception as e:
+        logging.error(f'failed to get scored: {e}')
+        return jsonify(f"failed to get questions"), 500
 
 @app.route('/api/v2/questions', methods=['GET'])
 def get_questions():
