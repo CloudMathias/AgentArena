@@ -45,11 +45,42 @@ client = genai.Client(
 
 model = "gemini-2.0-flash-001"
 
+system_instruction = """You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria. 
+You will be given the question, the important points that should be included in the answer, and the actual answer provided by the AI agent.
+Your output should be a score from 1 to 10, where 1 is the lowest score (very poor answer) and 10 is the highest score (excellent answer).
+
+Instructions:
+1. Carefully analyze the question and understand its nuances.
+2. Review the important points that should be present in a good answer. These points serve as your evaluation criteria.
+3. Evaluate the AI agent's answer based on how well it addresses the question and incorporates the important points.
+4. Consider the following factors when assigning a score:
+    * Accuracy: Does the answer correctly address the question?
+    * Completeness: Does the answer cover all the important points?
+    * Clarity: Is the answer easy to understand and well-organized?
+    * Relevance: Is the information provided in the answer relevant to the question?
+    * Conciseness: Is the answer concise and to the point, avoiding unnecessary information?
+5. Assign a score from 1 to 10 based on your overall assessment.  Be objective and consistent in your scoring.
+
+Output:
+You ahould output a JSON object that has the following fields:
+    - score: An integer between 1 and 10.
+    - feedback: An explaination for why the specific score was chosen. Do not include the answer to the question as this will be shown to the end user.
+"""
+
 generate_content_config = types.GenerateContentConfig(
-    temperature=1,
+    temperature=1, # TODO: Lower temperature to get more consistent outputs.
     top_p=0.95,
-    max_output_tokens=2,
     response_modalities=["TEXT"],
+    response_mime_type='application/json',
+    response_schema={
+        "type": "OBJECT",
+        "properties": {
+            "score": { "type":"INTEGER" },
+            "feedback": { "type":"STRING" }
+        }, 
+        "required": ["score","feedback"]
+    },
+    system_instruction=system_instruction,
     safety_settings=[types.SafetySetting(
         category="HARM_CATEGORY_HATE_SPEECH",
         threshold="OFF"
@@ -65,72 +96,43 @@ generate_content_config = types.GenerateContentConfig(
     )],
 )
 
-def extract_integer_from_llm_output(llm_output):
-    if not isinstance(llm_output, str):
-        return None
-    match = re.search(r'\d+', llm_output)
-    if match:
-        try:
-            return int(match.group())
-        except ValueError:
-            return None
-    else:
-        return None
-
 def generate(question, scoring_criteria, answer):
-    if answer == "":
-        answer = "No answer from the agent"
-    text1 = types.Part.from_text(text=f"""You are an AI answer evaluator. Your task is to assess the quality of answers provided by AI agents based on a set of criteria. You will be given the question, the important points that should be included in the answer, and the actual answer provided by the AI agent.  Your output should be a score from 1 to 10, where 1 is the lowest score (very poor answer) and 10 is the highest score (excellent answer).
+    if not answer or answer == "":
+        response = {
+            "score": 0,
+            "feedback": "No answer was provided for the question."
+        }
+        return response
 
-Instructions:
+    prompt = f"""The agent was asked the following question: {question}.
 
-1. Carefully analyze the question and understand its nuances.
-2. Review the important points that should be present in a good answer. These points serve as your evaluation criteria.
-3. Evaluate the AI agent's answer based on how well it addresses the question and incorporates the important points.
-4. Consider the following factors when assigning a score:
-    * Accuracy: Does the answer correctly address the question?
-    * Completeness: Does the answer cover all the important points?
-    * Clarity: Is the answer easy to understand and well-organized?
-    * Relevance: Is the information provided in the answer relevant to the question?
-    * Conciseness: Is the answer concise and to the point, avoiding unnecessary information?
+Here is the scoring criteria for question: {scoring_criteria}
 
-5. Assign a score from 1 to 10 based on your overall assessment.  Be objective and consistent in your scoring.
+Here is the answer that the agent gave: {answer}
 
-Input:
-
-Question: {question}
-
-Important Points: {scoring_criteria}
-
-Answer: {answer}
-
-Output:  Return only a numerical value from 1 to 10. Do not include any other text. Do not include any space""")
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                text1
-            ]
-        )
-    ]
+Score the agent's answer from 1 to 10 based on the scoring criteria.
+"""
+    
     response = client.models.generate_content(
         model=model,
-        contents=contents,
+        contents=prompt,
         config=generate_content_config,
     )
-    return response.text
+
+    return response.parsed
 
 @functions_framework.cloud_event
 def score_answers(cloud_event):
     """Background Cloud Function to be triggered by Pub/Sub.
        This function scores answers submitted by agents.
-    """
-    message = cloud_event.data["message"]
-    if not message or "data" not in message:
-        logging.error(f"invalid cloud_event format: {cloud_event}")
-        raise Exception(f"failed to extract data from cloud event: {cloud_event}")
-    
+    """    
     try:
+        # Validate that the event is valid.
+        message = cloud_event.data["message"]
+        if not message or "data" not in message:
+            logging.error(f"invalid cloud_event format: {cloud_event}")
+            raise Exception(f"failed to extract data from cloud event: {cloud_event}")
+        
         # Extract the data from the events body.
         encoded_data = message["data"]
         decoded_data = base64.b64decode(encoded_data).decode("utf-8")
@@ -140,30 +142,24 @@ def score_answers(cloud_event):
         question_id = data['question_id']
         answer_text = data['answer']
 
+        # Get the questions text and scoring criteria.
         question = next((q['text'] for q in QUESTIONS if q['id'] == question_id), None)
         scoring_criteria = next((q['criteria'] for q in QUESTIONS if q['id'] == question_id), None)
         if not question or not scoring_criteria:
             logging.error(f"question or scoring criteria not found for question ID: {question_id}")
             raise Exception(f"question or scoring criteria not found for question ID: {question_id}")
 
-        # Generate a score for each question in relation to the scoring criteria.
-        llm_output = generate(question, scoring_criteria, answer_text)
-        score = extract_integer_from_llm_output(llm_output)
-        if score is None:
-            logging.error(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
-            raise Exception(f"Invalid score generated for agent {agent_id}, question {question_id}: {llm_output}")
+        # Generate a score and feedback for each question in relation to the scoring criteria.
+        response = generate(question, scoring_criteria, answer_text)
         
         # Save the agent's score to the database.
-        score = int(score)
         doc_ref = db.collection(FIRESTORE_COLLECTION).document(f"{agent_id}_{question_id}")
         doc_ref.set({
             'agent_id': agent_id,
             'question_id': question_id,
             'answer': answer_text,
-            'score': score
+            'score': response['score']
         })
-        logging.info(f"Scored answer for agent {agent_id}, question {question_id}: {score}")
-            
-
+        logging.info(f"Scored answer for agent {agent_id}, question {question_id}: {response['score']}")
     except Exception as e:
-        print(f"Error processing message: {e}")
+        logging.error(f"Error processing message: {e}")
